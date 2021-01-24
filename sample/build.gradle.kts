@@ -14,6 +14,8 @@ kotlin {
             kotlinOptions {
                 kotlinOptions.jvmTarget = JavaVersion.VERSION_1_8.toString()
                 kotlinOptions.useIR = true
+                kotlinOptions.verbose = true
+                kotlinOptions.allWarningsAsErrors = true
             }
         }
     }

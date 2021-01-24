@@ -8,9 +8,12 @@ fun main() {
     Krang.addInterceptor { functionName, parameters ->
         println("Function with name:$functionName and ${parameters.joinToString()} called")
     }
-    testFunction("test", 1, true)
+    testFunction("test", 1, false)
 }
 
 @Intercept
 fun testFunction(@Redact a: String, @Redact b: Int, c: Boolean) {
+    if(c){
+        println("$a$b")
+    }
 }

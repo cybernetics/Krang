@@ -24,7 +24,6 @@ import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
 import org.jetbrains.kotlin.backend.common.deepCopyWithVariables
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
-import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.irBlockBody
@@ -43,16 +42,19 @@ import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isFakeOverriddenFromAny
 import org.jetbrains.kotlin.ir.util.statements
+import org.jetbrains.kotlin.util.Logger
 
 class KrangTransformer(
     private val pluginContext: IrPluginContext,
-    private val messageCollector: MessageCollector
+    private val logger: Logger
 ) : IrElementTransformerVoidWithContext() {
 
     private val anyNullableType = pluginContext.irBuiltIns.anyNType
 
     override fun visitFunctionNew(declaration: IrFunction): IrStatement {
-        if (shouldVisit(declaration)) {
+        logger.log("Krang: Visiting function ${declaration.name}")
+        if (shouldTransform(declaration)) {
+            logger.log("Krang: Transforming function ${declaration.name}")
             declaration.body = traceBodyBuilder(declaration)
         }
         return super.visitFunctionNew(declaration)
@@ -63,8 +65,12 @@ class KrangTransformer(
      *
      * @return True if function or its parent satisfies precondition for transformations
      */
-    private fun shouldVisit(function: IrFunction): Boolean =
-        function.body != null && hasAnnotation(function, pluginContext.krangTraceAnnotation)
+    private fun shouldTransform(function: IrFunction): Boolean =
+        (function.body != null).also {
+            logger.log("Krang: ${function.name} has body: $it")
+        } && (hasAnnotation(function, pluginContext.krangTraceAnnotation)).also {
+            logger.log("Krang: ${function.name} has annotation: $it")
+        }
 
     /**
      * Recursively checks if provided function or its parent has annotation applied to its signature
@@ -92,17 +98,23 @@ class KrangTransformer(
     ): IrBlockBody {
         return DeclarationIrBuilder(pluginContext, function.symbol).irBlockBody {
             //Construct vararg from function parameters
+            logger.log("Krang: Building arguments")
             val argsAsVarArg = varargOf(
                 pluginContext,
                 anyNullableType,
                 function.valueParameters
-                    .filter { !it.hasAnnotation(pluginContext.krangRedactAnnotation) }
-                    .map { valueParameter ->
-                        irGet(valueParameter)
+                    .filter { valueParameter ->
+                        !valueParameter.hasAnnotation(pluginContext.krangRedactAnnotation).also { isRedacted ->
+                            logger.log(
+                                "Krang: ${valueParameter.name} ${if (isRedacted) "is" else "is not"} redacted"
+                            )
+                        }
                     }
+                    .map { valueParameter -> irGet(valueParameter) }
             )
 
             //Append ir call to the runtime library
+            logger.log("Krang: Injecting Krang into ${function.name}")
             +irCall(pluginContext.krangInterceptFunctionCall).apply {
                 putValueArgument(0, irString("${function.name}"))
                 putValueArgument(1, argsAsVarArg.deepCopyWithVariables())
@@ -110,6 +122,7 @@ class KrangTransformer(
             }
 
             //Apply original statements
+            logger.log("Krang: Applying original statements for ${function.name}")
             for (statement in function.body!!.statements) +statement
         }
     }
